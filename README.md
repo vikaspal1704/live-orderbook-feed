@@ -88,6 +88,16 @@ TICK_MODE=replay REPLAY_PATH=samples/demo_ticks.ndjson uvicorn orderbook_feed.ap
 
 Expected behavior: synthetic ticks update the in-memory book; connected WebSocket clients receive a snapshot on subscribe, then sequenced deltas; `/health` returns OK; `/v1/book/DEMO%2FUSD` returns the current snapshot JSON. OpenAPI docs for the REST routes are at `/docs`.
 
+### Deploy (Render)
+
+[`render.yaml`](render.yaml) is a Render Blueprint for a free web service that tracks `main`:
+
+1. Render dashboard → **New** → **Blueprint** → pick this repository → **Apply**.
+2. Once live: `https://<service>.onrender.com/health`, and stream with
+   `FEED_WS_URL=wss://<service>.onrender.com/v1/ws python -m demo.ws_client`.
+
+Free instances sleep when idle; the first request after a sleep takes a few seconds, and the book restarts from `seq=0`.
+
 ### Configuration (environment variables)
 
 | Variable | Default | Meaning |
