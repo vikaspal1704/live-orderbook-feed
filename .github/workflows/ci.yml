@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Test
+        run: pytest -q
+      - name: Demo smoke (server + client, no API keys)
+        env:
+          TICK_INTERVAL_MS: "50"
+        run: |
+          uvicorn orderbook_feed.app:app --host 127.0.0.1 --port 8000 &
+          for _ in $(seq 1 50); do curl -sf http://127.0.0.1:8000/health && break; sleep 0.2; done
+          DEMO_DELTAS=3 python -m demo.ws_client

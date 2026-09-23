@@ -6,7 +6,7 @@ Built as a portfolio project by **Vikas Pal** (Software Engineer, Fintech) to de
 
 | | |
 |---|---|
-| **Status** | Docs-first — implementation pending |
+| **Status** | Implemented — see [`tests/`](tests/) and [CI](.github/workflows/ci.yml) |
 | **Language** | Python 3.11+ |
 | **Framework** | FastAPI (Starlette WebSockets) |
 | **License** | [MIT](LICENSE) |
@@ -49,7 +49,7 @@ Built as a portfolio project by **Vikas Pal** (Software Engineer, Fintech) to de
 
 ---
 
-## Stack (target)
+## Stack
 
 - **Python** 3.11+
 - **HTTP / WebSocket**: **FastAPI** + Starlette WebSockets (locked in [`docs/TRD.md`](docs/TRD.md))
@@ -61,7 +61,7 @@ Built as a portfolio project by **Vikas Pal** (Software Engineer, Fintech) to de
 
 ---
 
-## How to run (once implemented)
+## How to run
 
 ```bash
 # Clone
@@ -79,11 +79,54 @@ pytest -q
 # Run server
 uvicorn orderbook_feed.app:app --host 0.0.0.0 --port 8000
 
-# Optional demo client (prints snapshot then deltas)
+# Demo client, in a second terminal (prints snapshot then 5 deltas, exits 0)
 python -m demo.ws_client
+
+# Or: replay a scripted NDJSON file instead of synthetic ticks
+TICK_MODE=replay REPLAY_PATH=samples/demo_ticks.ndjson uvicorn orderbook_feed.app:app
 ```
 
-Expected behavior: synthetic ticks update the in-memory book; connected WebSocket clients receive a snapshot on subscribe, then sequenced deltas; `/health` returns OK; `/v1/book/DEMO%2FUSD` returns the current snapshot JSON.
+Expected behavior: synthetic ticks update the in-memory book; connected WebSocket clients receive a snapshot on subscribe, then sequenced deltas; `/health` returns OK; `/v1/book/DEMO%2FUSD` returns the current snapshot JSON. OpenAPI docs for the REST routes are at `/docs`.
+
+### Configuration (environment variables)
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `SYMBOL` | `DEMO/USD` | Sole instrument |
+| `HOST` / `PORT` | `0.0.0.0` / `8000` | Bind address (used by `python -m orderbook_feed`) |
+| `HEARTBEAT_INTERVAL_SEC` | `5.0` | Server → client heartbeat period |
+| `CLIENT_QUEUE_MAX` | `64` | Per-client queue depth before slow-consumer disconnect (close `1013`) |
+| `TICK_INTERVAL_MS` | `100` | Synthetic / replay tick cadence |
+| `TICK_MODE` | `synthetic` | `synthetic` \| `replay` \| `manual` (tests inject ticks) |
+| `REPLAY_PATH` | unset | NDJSON file for `TICK_MODE=replay` |
+| `BOOK_DEPTH_LEVELS` | `10` | Top-N levels per side in snapshots |
+| `SYNTHETIC_SEED` | unset | Seed for a reproducible synthetic feed |
+
+### Project layout
+
+```
+orderbook_feed/
+  app.py          # FastAPI app + lifespan (feed task, heartbeat task)
+  config.py       # Settings from environment
+  models.py       # Pydantic v2 WS/REST schemas (mirror API_CONTRACT)
+  book.py         # In-memory aggregated L2 book
+  sequencer.py    # Monotonic seq
+  tick_source.py  # Synthetic / NDJSON replay / manual sources
+  feed.py         # Tick -> book -> seq -> delta -> hub
+  hub.py          # Per-client bounded queues, fan-out, slow-consumer drop
+  ws.py           # WS /v1/ws: subscribe lifecycle, reader + writer per client
+  rest.py         # GET /health, GET /v1/book/{symbol}
+demo/ws_client.py # python -m demo.ws_client (applies deltas, detects seq gaps)
+samples/          # demo_ticks.ndjson replay file
+tests/            # pytest suite incl. ARCHITECTURE §7 worked example + e2e demo test
+```
+
+### Limitations (educational, not a production exchange)
+
+- One process, one event loop, one instrument; no cross-process fan-out.
+- No durable replay: reconnecting clients recover via a fresh snapshot.
+- Snapshots are top-N; a client holding only the snapshot may not see levels beyond N until a delta touches them.
+- Heartbeats go to every connected client (subscribed or not) through the same bounded queue, so they are subject to the slow-consumer policy.
 
 ---
 
