@@ -1,0 +1,8 @@
+{"changes": [{"side": "BID", "price": 100, "quantity": 5}]}
+{"changes": [{"side": "ASK", "price": 101, "quantity": 3}, {"side": "BID", "price": 100, "quantity": 8}]}
+{"changes": [{"side": "BID", "price": 100, "quantity": 0}, {"side": "BID", "price": 99, "quantity": 4}]}
+{"changes": [{"side": "ASK", "price": 102, "quantity": 6}, {"side": "BID", "price": 98, "quantity": 9}]}
+{"changes": [{"side": "ASK", "price": 101, "quantity": 1}]}
+{"changes": [{"side": "BID", "price": 100, "quantity": 2}, {"side": "ASK", "price": 103, "quantity": 7}]}
+{"changes": [{"side": "ASK", "price": 101, "quantity": 0}, {"side": "BID", "price": 99, "quantity": 6}]}
+{"changes": [{"side": "BID", "price": 97, "quantity": 12}, {"side": "ASK", "price": 104, "quantity": 5}]}
