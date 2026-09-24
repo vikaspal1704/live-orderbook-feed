@@ -1,0 +1,22 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Deploy: Render dashboard -> New -> Blueprint -> select this repo (tracks main).
+services:
+  - type: web
+    name: live-orderbook-feed
+    runtime: python
+    plan: free
+    branch: main
+    autoDeploy: true
+    buildCommand: pip install .
+    # Single worker: the book and fan-out hub live in one process (see docs/TRD.md §7).
+    startCommand: uvicorn orderbook_feed.app:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: TICK_MODE
+        value: synthetic
+      - key: TICK_INTERVAL_MS
+        value: "250"
+      - key: HEARTBEAT_INTERVAL_SEC
+        value: "5"
