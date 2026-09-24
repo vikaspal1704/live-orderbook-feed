@@ -1,0 +1,39 @@
+name: Live smoke test
+
+# Checks a deployed instance end to end: /health, the / page, and a real
+# WebSocket subscribe -> snapshot -> deltas run with the demo client.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Base URL of the deployed service
+        default: https://live-orderbook-feed.onrender.com
+        required: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: ${{ inputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Health (waits for a sleeping free instance to wake)
+        run: |
+          for _ in $(seq 1 24); do
+            if curl -sf --max-time 20 "$BASE_URL/health"; then echo; exit 0; fi
+            sleep 5
+          done
+          echo "::error::$BASE_URL/health did not respond"; exit 1
+      - name: Book and page
+        run: |
+          curl -sf "$BASE_URL/v1/book/DEMO%2FUSD" | python -m json.tool | head -20
+          curl -sf "$BASE_URL/" | grep -q "Live Order Book"
+      - name: WebSocket stream via demo client
+        run: |
+          export FEED_WS_URL="$(echo "$BASE_URL" | sed -e 's#^https://#wss://#' -e 's#^http://#ws://#')/v1/ws"
+          DEMO_DELTAS=5 DEMO_TIMEOUT_SEC=30 python -m demo.ws_client

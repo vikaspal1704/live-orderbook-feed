@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Order Book</title>
+<link rel="icon" href="data:,">
+<meta name="description" content="Live L2 order book streamed over WebSocket: snapshot + sequenced deltas + heartbeats.">
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1c1c1a; --muted: #6b6a66; --border: #e3e2de;
+    --bid: #1a7f4b; --bid-bar: rgba(26, 127, 75, 0.14); --ask: #c0392b; --ask-bar: rgba(192, 57, 43, 0.14);
+    --flash: rgba(230, 170, 30, 0.35); --ok: #1a7f4b; --warn: #b7791f; --bad: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --panel: #1d1d1b; --text: #ecebe7; --muted: #9a9993; --border: #2e2d2a;
+      --bid: #4cc38a; --bid-bar: rgba(76, 195, 138, 0.16); --ask: #ef6b5e; --ask-bar: rgba(239, 107, 94, 0.16);
+      --flash: rgba(230, 170, 30, 0.28);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 40px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  .sub { color: var(--muted); }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel); font-size: 13px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 16px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .stat .label { color: var(--muted); font-size: 12px; }
+  .stat .value { font-size: 18px; font-variant-numeric: tabular-nums; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .panel h2 { font-size: 13px; font-weight: 600; margin: 0; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { padding: 4px 12px; text-align: right; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  th:first-child, td:first-child { text-align: left; }
+  /* Depth bar: a row background filled to --pct of the widest level. */
+  tr.bid { background: linear-gradient(to right, var(--bid-bar) var(--pct), transparent var(--pct)); }
+  tr.ask { background: linear-gradient(to right, var(--ask-bar) var(--pct), transparent var(--pct)); }
+  tr.bid td.px { color: var(--bid); } tr.ask td.px { color: var(--ask); }
+  tr.flash td { animation: flash 0.8s ease-out; }
+  @keyframes flash { from { background: var(--flash); } to { background: transparent; } }
+  tr.spread td { color: var(--muted); font-size: 12px; text-align: center; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .log { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; max-height: 520px; overflow-y: auto; padding: 8px 12px; margin: 0; }
+  .log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .log .t-snapshot { color: var(--warn); } .log .t-error { color: var(--bad); } .log .t-heartbeat { color: var(--muted); }
+  .empty { color: var(--muted); text-align: center; padding: 16px; }
+  footer { margin-top: 20px; color: var(--muted); font-size: 13px; }
+  footer a { color: inherit; }
+  @media (prefers-reduced-motion: reduce) { tr.flash td { animation: none; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Live Order Book <span id="symbol" class="sub"></span></h1>
+    <span class="pill"><span id="status-dot" class="dot"></span><span id="status">connecting…</span></span>
+    <span class="sub">L2 snapshot + sequenced deltas over <code>/v1/ws</code></span>
+  </header>
+
+  <section class="stats" aria-label="Feed statistics">
+    <div class="stat"><div class="label">Sequence</div><div class="value" id="seq">–</div></div>
+    <div class="stat"><div class="label">Best bid / ask</div><div class="value" id="bbo">–</div></div>
+    <div class="stat"><div class="label">Spread</div><div class="value" id="spread">–</div></div>
+    <div class="stat"><div class="label">Deltas / sec</div><div class="value" id="rate">0</div></div>
+    <div class="stat"><div class="label">Last heartbeat</div><div class="value" id="hb">–</div></div>
+    <div class="stat"><div class="label">Gaps recovered</div><div class="value" id="gaps">0</div></div>
+  </section>
+
+  <div class="grid">
+    <section class="panel" aria-label="Order book">
+      <h2>Book (top 10 per side)</h2>
+      <table>
+        <thead><tr><th>Price</th><th>Quantity</th></tr></thead>
+        <tbody id="asks"></tbody>
+        <tbody><tr class="spread"><td colspan="2" id="spread-row">waiting for snapshot…</td></tr></tbody>
+        <tbody id="bids"></tbody>
+      </table>
+    </section>
+    <section class="panel" aria-label="Message log">
+      <h2>Messages</h2>
+      <div class="log" id="log" role="log" aria-live="off"></div>
+    </section>
+  </div>
+
+  <footer>
+    Synthetic data, educational demo — not a real market.
+    <a href="/health">/health</a> · <a id="book-link" href="/v1/book/DEMO%2FUSD">/v1/book</a> ·
+    <a href="/docs">API docs</a> ·
+    <a href="https://github.com/vikaspal1704/live-orderbook-feed">source</a>
+  </footer>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const DEPTH = 10;
+  const HEARTBEAT_TIMEOUT_MS = 15000; // ~3x the default 5 s server heartbeat
+  const MAX_LOG = 60;
+
+  const $ = (id) => document.getElementById(id);
+  const book = { bids: new Map(), asks: new Map() };
+  let symbol = "DEMO/USD";
+  let lastSeq = null;
+  let awaitingSnapshot = true;
+  let gaps = 0;
+  let ws = null;
+  let backoffMs = 1000;
+  let lastMessageAt = 0;
+  let lastHeartbeatAt = 0;
+  const deltaTimes = [];
+  const changed = new Set();
+
+  function setStatus(text, level) {
+    $("status").textContent = text;
+    $("status-dot").className = "dot " + level;
+  }
+
+  function log(type, text) {
+    const el = document.createElement("div");
+    el.className = "t-" + type;
+    el.textContent = new Date().toLocaleTimeString() + "  " + text;
+    const box = $("log");
+    box.prepend(el);
+    while (box.childElementCount > MAX_LOG) box.lastElementChild.remove();
+  }
+
+  function loadSnapshot(msg) {
+    book.bids = new Map(msg.bids.map((l) => [l.price, l.quantity]));
+    book.asks = new Map(msg.asks.map((l) => [l.price, l.quantity]));
+    lastSeq = msg.seq;
+    awaitingSnapshot = false;
+    changed.clear();
+  }
+
+  function applyDelta(msg) {
+    for (const c of msg.changes) {
+      const side = c.side === "BID" ? book.bids : book.asks;
+      if (c.quantity === 0) side.delete(c.price);
+      else side.set(c.price, c.quantity);
+      changed.add(c.side + ":" + c.price);
+    }
+    lastSeq = msg.seq;
+  }
+
+  function send(obj) {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+  }
+
+  function onMessage(event) {
+    lastMessageAt = Date.now();
+    const msg = JSON.parse(event.data);
+    switch (msg.type) {
+      case "snapshot":
+        loadSnapshot(msg);
+        log("snapshot", `snapshot seq=${msg.seq} bids=${msg.bids.length} asks=${msg.asks.length}`);
+        break;
+      case "delta":
+        if (awaitingSnapshot || msg.seq <= lastSeq) return; // stale or pre-snapshot
+        if (msg.seq !== lastSeq + 1) {
+          gaps += 1;
+          log("error", `gap: expected seq ${lastSeq + 1}, got ${msg.seq} — requesting resnapshot`);
+          awaitingSnapshot = true;
+          send({ type: "resnapshot", symbol });
+          return;
+        }
+        applyDelta(msg);
+        deltaTimes.push(Date.now());
+        log("delta", `delta seq=${msg.seq} ` +
+          msg.changes.map((c) => `${c.side} ${c.price}=${c.quantity}`).join(", "));
+        break;
+      case "heartbeat":
+        lastHeartbeatAt = Date.now();
+        log("heartbeat", "heartbeat");
+        break;
+      case "error":
+        log("error", `error ${msg.code}: ${msg.message}`);
+        break;
+    }
+    render();
+  }
+
+  function sortedLevels(map, descending) {
+    const prices = [...map.keys()].sort((a, b) => (descending ? b - a : a - b)).slice(0, DEPTH);
+    return prices.map((p) => [p, map.get(p)]);
+  }
+
+  function rows(levels, side, maxQty) {
+    return levels.map(([price, qty]) => {
+      const pct = maxQty ? Math.max(2, Math.round((qty / maxQty) * 100)) : 0;
+      const flash = changed.has((side === "bid" ? "BID:" : "ASK:") + price) ? " flash" : "";
+      return `<tr class="level ${side}${flash}" style="--pct:${pct}%">` +
+        `<td class="px">${price}</td><td>${qty}</td></tr>`;
+    }).join("");
+  }
+
+  function render() {
+    const bids = sortedLevels(book.bids, true);
+    const asks = sortedLevels(book.asks, false);
+    const maxQty = Math.max(1, ...bids.map((l) => l[1]), ...asks.map((l) => l[1]));
+    $("asks").innerHTML = asks.length ? rows(asks.slice().reverse(), "ask", maxQty)
+      : '<tr><td colspan="2" class="empty">no asks</td></tr>';
+    $("bids").innerHTML = bids.length ? rows(bids, "bid", maxQty)
+      : '<tr><td colspan="2" class="empty">no bids</td></tr>';
+    changed.clear();
+
+    const bestBid = bids.length ? bids[0][0] : null;
+    const bestAsk = asks.length ? asks[0][0] : null;
+    const spread = bestBid !== null && bestAsk !== null ? bestAsk - bestBid : null;
+    $("seq").textContent = lastSeq === null ? "–" : lastSeq;
+    $("bbo").textContent = `${bestBid ?? "–"} / ${bestAsk ?? "–"}`;
+    $("spread").textContent = spread ?? "–";
+    $("spread-row").textContent = spread === null ? "one side empty" : `spread ${spread}`;
+  }
+
+  function tick() {
+    const now = Date.now();
+    while (deltaTimes.length && now - deltaTimes[0] > 1000) deltaTimes.shift();
+    $("rate").textContent = deltaTimes.length;
+    $("hb").textContent = lastHeartbeatAt ? `${Math.round((now - lastHeartbeatAt) / 1000)} s ago` : "–";
+    $("gaps").textContent = gaps;
+    if (ws && ws.readyState === WebSocket.OPEN && now - lastMessageAt > HEARTBEAT_TIMEOUT_MS) {
+      log("error", "no messages for 15 s — reconnecting");
+      ws.close();
+    }
+  }
+
+  function connect() {
+    const url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/v1/ws";
+    setStatus("connecting…", "warn");
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      backoffMs = 1000;
+      lastMessageAt = Date.now();
+      awaitingSnapshot = true;
+      setStatus("live", "ok");
+      send({ type: "subscribe", symbol, client_id: "web-ui" });
+    };
+    ws.onmessage = onMessage;
+    ws.onclose = (event) => {
+      const why = event.code === 1013 ? "dropped as slow consumer" : `closed (${event.code})`;
+      setStatus(`${why}; retrying in ${Math.round(backoffMs / 1000)} s`, "bad");
+      log("error", `connection ${why}`);
+      setTimeout(connect, backoffMs);
+      backoffMs = Math.min(backoffMs * 2, 10000);
+    };
+  }
+
+  fetch("/health")
+    .then((r) => r.json())
+    .then((h) => { symbol = h.symbol; })
+    .catch(() => {})
+    .finally(() => {
+      $("symbol").textContent = symbol;
+      $("book-link").href = "/v1/book/" + encodeURIComponent(symbol);
+      render();
+      connect();
+      setInterval(tick, 500);
+    });
+})();
+</script>
+</body>
+</html>

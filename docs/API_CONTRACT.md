@@ -284,3 +284,7 @@ HealthResponse, BookResponse
 ## 7. OpenAPI
 
 FastAPI SHOULD expose OpenAPI for REST routes only. WebSocket message schemas are defined in this document (not necessarily in OpenAPI).
+
+## 8. Demo page
+
+`GET /` returns an HTML page (not in OpenAPI) that shows the live book. It is a client of `WS /v1/ws` and uses only the messages defined above, and it adds no protocol fields. It is a read-only viewer, not the trading UI that PRD §2 lists as a non-goal.

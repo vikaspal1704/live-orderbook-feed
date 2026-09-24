@@ -88,13 +88,18 @@ TICK_MODE=replay REPLAY_PATH=samples/demo_ticks.ndjson uvicorn orderbook_feed.ap
 
 Expected behavior: synthetic ticks update the in-memory book; connected WebSocket clients receive a snapshot on subscribe, then sequenced deltas; `/health` returns OK; `/v1/book/DEMO%2FUSD` returns the current snapshot JSON. OpenAPI docs for the REST routes are at `/docs`.
 
+### Live view
+
+Open the service root (`/`) in a browser for a read-only live view of the book. The page streams from `/v1/ws` using the same public protocol as the demo client. It shows the top-10 bid/ask ladder with depth bars, sequence number, spread, delta rate, heartbeats and gap recovery through `resnapshot`, and it reconnects automatically.
+
 ### Deploy (Render)
 
 [`render.yaml`](render.yaml) is a Render Blueprint for a free web service that tracks `main`:
 
 1. Render dashboard → **New** → **Blueprint** → pick this repository → **Apply**.
-2. Once live: `https://<service>.onrender.com/health`, and stream with
+2. Once live, open `https://<service>.onrender.com/` for the live view, check `/health`, or stream from a terminal with
    `FEED_WS_URL=wss://<service>.onrender.com/v1/ws python -m demo.ws_client`.
+3. To check a deployment end to end from GitHub, run the **Live smoke test** workflow (Actions tab) with the service URL.
 
 Free instances sleep when idle; the first request after a sleep takes a few seconds, and the book restarts from `seq=0`.
 
@@ -126,6 +131,7 @@ orderbook_feed/
   hub.py          # Per-client bounded queues, fan-out, slow-consumer drop
   ws.py           # WS /v1/ws: subscribe lifecycle, reader + writer per client
   rest.py         # GET /health, GET /v1/book/{symbol}
+  ui.py           # GET / serves static/index.html (read-only live view)
 demo/ws_client.py # python -m demo.ws_client (applies deltas, detects seq gaps)
 samples/          # demo_ticks.ndjson replay file
 tests/            # pytest suite incl. ARCHITECTURE §7 worked example + e2e demo test

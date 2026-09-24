@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from . import __version__, rest, ws
+from . import __version__, rest, ui, ws
 from .config import Settings
 from .feed import Clock, Feed, now_ms
 from .hub import Hub, run_heartbeats
@@ -51,6 +51,7 @@ def create_app(
     app.state.feed = feed
     app.include_router(rest.router)
     app.include_router(ws.router)
+    app.include_router(ui.router)
     return app
 
 
