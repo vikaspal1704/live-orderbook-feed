@@ -50,3 +50,16 @@ def test_rest_book_unknown_404(harness):
 
     assert response.status_code == 404
     assert response.json() == {"detail": "unknown symbol: FOO/BAR"}
+
+
+def test_index_serves_live_book_page(harness):
+    response = harness.client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "/v1/ws" in response.text
+    assert '"subscribe"' in response.text
+
+
+def test_index_page_not_in_openapi(harness):
+    assert "/" not in harness.client.get("/openapi.json").json()["paths"]
